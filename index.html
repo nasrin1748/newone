@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Canvas Drawing with Camera</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css" integrity="sha384-xOolHFLEh07PJGoPkLv1IbcEPTNtaed2xpHsD9ESMhqIYd0nLMwNLD69Npy4HI+N" crossorigin="anonymous">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-size: cover;
+            background-position: center;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        canvas {
+            display: block;
+            margin: 0 auto;
+            background-color: white;
+            border: 5px solid;
+            position: relative;
+        }
+
+        .control-panel {
+            margin-left: 20px;
+            width: 150px;
+        }
+
+        .color-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+
+        .button-row {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            margin-top: 10px;
+        }
+
+        .btn-small {
+            font-size: 0.8rem;
+            padding: 2px 5px;
+        }
+
+        .movingDiv {
+            width: 70px;
+            height: 70px;
+            background-color: red;
+            position: absolute;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+        }
+
+        video {
+            display: none; /* Hide the video element */
+        }
+
+         .selected::before {
+            height: 30px;
+            width: 30px;
+            left: 18px;
+            top: -8px;
+            font-size: 3rem;
+            position: absolute;
+        }
+        .select-colour {
+            height: 20px;
+            width: 20px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body onload="init()">
+    <div style="display: flex;">
+        <div id="canvasContainer" style="position: relative;">
+            <canvas id="can" width="600" height="500"></canvas>
+        </div>
+        <div class="control-panel">
+            <div class="button-row">
+                <input type="file" id="imageInput" class="btn btn-secondary btn-small mt-2" accept="image/*" multiple>
+                <button id="cameraButton" class="btn btn-secondary btn-small" onclick="startCamera()">Start Camera</button>
+                <button id="clr" class="btn btn-light btn-small" onclick="erase()">Clear Canvas</button>
+                <button id="download" class="btn btn-primary btn-small" onclick="downloadCanvas()">Download</button>
+                <button id="addMovingDiv" class="btn btn-secondary btn-small" onclick="addMovingDiv()">Add Moving Div</button>
+                <div class="mt-2">
+                    <label for="div-size-slider">Div Size:</label>
+                    <input type="range" id="div-size-slider" min="10" max="150" value="70" oninput="updateAllDivSizes()">
+                </div>
+            </div>
+        </div>
+    </div>
+    <video id="videoElement" autoplay></video>
+    <script>
+        let canvas, ctx;
+        movingDivCounter = 0;
+        let videoElement; // For accessing the user's camera
+        const images = []; // To store multiple images
+        let currentImage = null; // Currently selected image
+        const cornerSize = 10;
+
+        function init() {
+            canvas = document.getElementById('can');
+            ctx = canvas.getContext("2d");
+            videoElement = document.getElementById('videoElement');
+
+            // Event listeners for file input
+            document.getElementById('imageInput').addEventListener('change', handleImageUpload);
+
+            // Event listeners for canvas interaction
+            canvas.addEventListener("mousedown", handleMouseDown, false);
+            canvas.addEventListener("mousemove", handleMouseMove, false);
+            canvas.addEventListener("mouseup", handleMouseUp, false);
+        }
+
+        function startCamera() {
+            // Request access to the user's camera
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then((stream) => {
+                    videoElement.srcObject = stream;
+                    videoElement.style.display = "none"; // Hide the video element
+                    drawVideoToCanvas();
+                })
+                .catch((err) => {
+                    console.error("Error accessing the camera: ", err);
+                    alert("Unable to access the camera. Please check your browser settings.");
+                });
+        }
+
+        function drawVideoToCanvas() {
+            // Continuously draw the video feed onto the canvas
+            if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
+                ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+            }
+            // Re-draw images on top of the video
+            drawImages();
+            requestAnimationFrame(drawVideoToCanvas);
+        }
+
+        function handleImageUpload(event) {
+            const files = event.target.files;
+            Array.from(files).forEach(file => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const img = new Image();
+                    img.src = reader.result;
+                    img.onload = () => {
+                        const imageObject = {
+                            img: img,
+                            x: (canvas.width - img.width) / 2,
+                            y: (canvas.height - img.height) / 2,
+                            width: img.width,
+                            height: img.height
+                        };
+                        images.push(imageObject);
+                        drawCanvas();
+                    };
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function handleMouseDown(event) {
+            const mouseX = event.offsetX;
+            const mouseY = event.offsetY;
+
+            // Loop through images in reverse order to select the topmost image
+            for (let i = images.length - 1; i >= 0; i--) {
+                const image = images[i];
+
+                // Check if the mouse is on the resize handle
+                if (
+                    mouseX >= image.x + image.width - cornerSize &&
+                    mouseX <= image.x + image.width + cornerSize &&
+                    mouseY >= image.y + image.height - cornerSize &&
+                    mouseY <= image.y + image.height + cornerSize
+                ) {
+                    currentImage = image;
+                    currentImage.isResizing = true;
+                    return;
+                }
+
+                // Check if the mouse is on the image for dragging
+                if (
+                    mouseX >= image.x &&
+                    mouseX <= image.x + image.width &&
+                    mouseY >= image.y &&
+                    mouseY <= image.y + image.height
+                ) {
+                    currentImage = image;
+                    currentImage.isDragging = true;
+                    currentImage.offsetX = mouseX - image.x;
+                    currentImage.offsetY = mouseY - image.y;
+                    return;
+                }
+            }
+        }
+
+        function handleMouseMove(event) {
+            if (!currentImage) return;
+
+            const mouseX = event.offsetX;
+            const mouseY = event.offsetY;
+
+            if (currentImage.isResizing) {
+                currentImage.width = mouseX - currentImage.x;
+                currentImage.height = mouseY - currentImage.y;
+                drawCanvas();
+                return;
+            }
+
+            if (currentImage.isDragging) {
+                currentImage.x = mouseX - currentImage.offsetX;
+                currentImage.y = mouseY - currentImage.offsetY;
+                drawCanvas();
+            }
+        }
+
+        function handleMouseUp() {
+            if (currentImage) {
+                currentImage.isDragging = false;
+                currentImage.isResizing = false;
+            }
+            currentImage = null;
+        }
+
+        function drawCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw all images
+            drawImages();
+        }
+
+        function drawImages() {
+            images.forEach(image => {
+                ctx.drawImage(image.img, image.x, image.y, image.width, image.height);
+
+                // Draw resize handle
+                ctx.fillStyle = 'blue';
+                ctx.fillRect(
+                    image.x + image.width - cornerSize / 2,
+                    image.y + image.height - cornerSize / 2,
+                    cornerSize,
+                    cornerSize
+                );
+            });
+        }
+
+        function erase() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            images.length = 0; // Clear all images
+        }
+
+        function downloadCanvas() {
+            const link = document.createElement('a');
+            link.href = canvas.toDataURL();
+            link.download = 'canvas_drawing.png';
+            link.click();
+        }
+
+
+
+        // Moving Divs
+        function addMovingDiv() {
+            const newDiv = document.createElement('div');
+            newDiv.classList.add('movingDiv');
+            newDiv.id = `movingDiv${movingDivCounter}`;
+            newDiv.style.width = `70px`;
+            newDiv.style.height = `70px`;
+            newDiv.style.backgroundColor = getRandomColor();
+            document.getElementById('canvasContainer').appendChild(newDiv);
+
+            moveDiv(newDiv);
+            const moveInterval = setInterval(() => moveDiv(newDiv), 2000);
+
+            // Optionally stop moving after some time
+            setTimeout(() => {
+                clearInterval(moveInterval);
+                newDiv.style.display = 'none';
+            }, 20000);
+
+            movingDivCounter++;
+        }
+
+        function moveDiv(div) {
+            const canvasRect = canvas.getBoundingClientRect();
+            const x = Math.random() * (canvasRect.width - parseInt(div.style.width));
+            const y = Math.random() * (canvasRect.height - parseInt(div.style.height));
+            const angle = Math.random() * 360;
+            div.style.left = `${x}px`;
+            div.style.top = `${y}px`;
+            div.style.transform = `rotate(${angle}deg)`;
+        }
+
+        function getRandomColor() {
+            const letters = '0123456789ABCDEF';
+            let color = '#';
+            for (let i = 0; i < 6; i++) {
+                color += letters[Math.floor(Math.random() * 16)];
+            }
+            return color;
+        }
+
+        function updateAllDivSizes() {
+            const newSize = document.getElementById('div-size-slider').value;
+            const movingDivs = document.getElementsByClassName('movingDiv');
+            for (let div of movingDivs) {
+                div.style.width = `${newSize}px`;
+                div.style.height = `${newSize}px`;
+            }
+        }
+    </script>
+</body>
+
+</html>
